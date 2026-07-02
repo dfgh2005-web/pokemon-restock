@@ -14,6 +14,7 @@ GitHub Actions가 약 5분마다 이 스크립트를 한 번씩 실행합니다.
 import os
 import sys
 import json
+import html
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -125,11 +126,12 @@ def normalize_image(url):
 
 def is_available(p):
     """상품 하나가 구매 가능한지 판단. (가능여부, 판단근거) 반환."""
-    for k in SOLDOUT_KEYS:               # 1) 명시적 품절 플래그
+    # 1) soldOut 플래그가 있으면 그대로 신뢰 (True=품절, False=판매중). 이 사이트의 핵심 신호.
+    for k in SOLDOUT_KEYS:
         if isinstance(p.get(k), bool):
-            if p[k]:
-                return False, f"{k}=true"
-    status = None                        # 2) 판매 상태 문자열
+            return (not p[k]), f"{k}={str(p[k]).lower()}"
+    # 2) 판매 상태 문자열
+    status = None
     for k in STATUS_KEYS:
         v = p.get(k)
         if isinstance(v, str):
@@ -137,18 +139,20 @@ def is_available(p):
             break
     if status in NOT_BUYABLE_STATUS:
         return False, f"status={status}"
-    for k in STOCK_KEYS:                 # 3) 재고 수량
-        v = p.get(k)
-        if isinstance(v, (int, float)):
-            return (v > 0), f"{k}={v}"
-    if status in BUYABLE_STATUS:         # 4) 명시적 '판매중'
+    if status in BUYABLE_STATUS:
         return True, f"status={status}"
-    return True, "신호없음→가용간주"      # 5) 신호 없으면 가용으로 간주(오탐 방지)
+    # 3) 재고 수량 (음수 -999 등은 '재고 관리 안함' 신호이므로 무시)
+    for k in STOCK_KEYS:
+        v = p.get(k)
+        if isinstance(v, (int, float)) and v >= 0:
+            return (v > 0), f"{k}={v}"
+    # 4) 아무 신호도 없으면 판매중으로 간주
+    return True, "신호없음→판매중간주"
 
 
 def extract(p):
     no = _first(p, NO_KEYS)
-    name = _first(p, NAME_KEYS) or "(이름없음)"
+    name = html.unescape(str(_first(p, NAME_KEYS) or "(이름없음)"))
     price = _first(p, PRICE_KEYS)
     image = normalize_image(_first(p, IMAGE_KEYS))
     url = _first(p, URL_KEYS) or build_detail_url(no)
